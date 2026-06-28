@@ -25,10 +25,8 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Accept Android SDK licenses
-      run: |
-        yes | sdkmanager --licenses || true
-        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+    - name: Accept SDK licenses
+      run: yes | sdkmanager --licenses || true
 
     - name: Generate Keystore
       run: |
@@ -42,236 +40,255 @@ jobs:
           -keypass benchmark123 \
           -dname "CN=Benchmark, OU=Dev, O=Benchmark, L=BR, ST=BR, C=BR"
 
-    - name: Build Android APK
+    - name: Build Android Project
       env:
         ANDROID_HOME: ${{ env.ANDROID_HOME }}
+      shell: bash
       run: |
-        PROJECT_DIR="android-project"
-        mkdir -p "$PROJECT_DIR/app/src/main/java/com/benchmark/celular"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/values"
-        mkdir -p "$PROJECT_DIR/app/src/main/assets"
-        
+        set -e
+        P="android-project"
+        mkdir -p "$P/app/src/main/java/com/benchmark/celular"
+        mkdir -p "$P/app/src/main/res/values"
+        mkdir -p "$P/app/src/main/assets"
+        mkdir -p "$P/app/src/main/res/mipmap-mdpi"
+        mkdir -p "$P/app/src/main/res/mipmap-hdpi"
+        mkdir -p "$P/app/src/main/res/mipmap-xhdpi"
+        mkdir -p "$P/app/src/main/res/mipmap-xxhdpi"
+        mkdir -p "$P/gradle/wrapper"
+
         # Copy web assets
-        cp index.html "$PROJECT_DIR/app/src/main/assets/"
-        cp manifest.json "$PROJECT_DIR/app/src/main/assets/"
-        cp sw.js "$PROJECT_DIR/app/src/main/assets/"
-        if [ -d icons ]; then
-          cp -r icons "$PROJECT_DIR/app/src/main/assets/"
-        fi
-        
-        # MainActivity.java
-        cat > "$PROJECT_DIR/app/src/main/java/com/benchmark/celular/MainActivity.java" << 'JAVA'
-        package com.benchmark.celular;
-        
-        import android.os.Bundle;
-        import android.webkit.WebSettings;
-        import android.webkit.WebView;
-        import android.webkit.WebViewClient;
-        import androidx.appcompat.app.AppCompatActivity;
-        
-        public class MainActivity extends AppCompatActivity {
-            @Override
-            protected void onCreate(Bundle savedInstanceState) {
-                super.onCreate(savedInstanceState);
-                WebView webView = new WebView(this);
-                WebSettings settings = webView.getSettings();
-                settings.setJavaScriptEnabled(true);
-                settings.setDomStorageEnabled(true);
-                settings.setAllowFileAccess(true);
-                settings.setAllowContentAccess(true);
-                settings.setLoadWithOverviewMode(true);
-                settings.setUseWideViewPort(true);
-                settings.setMediaPlaybackRequiresUserGesture(false);
-                settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-                webView.setWebViewClient(new WebViewClient());
-                webView.loadUrl("file:///android_asset/index.html");
-                setContentView(webView);
-                
-                // Enable fullscreen
-                getWindow().getDecorView().setSystemUiVisibility(
-                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN |
-                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                );
-            }
-        }
-        JAVA
-        
-        # AndroidManifest.xml
-        cat > "$PROJECT_DIR/app/src/main/AndroidManifest.xml" << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-            package="com.benchmark.celular">
-            <uses-permission android:name="android.permission.INTERNET" />
-            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-            <uses-permission android:name="android.permission.BATTERY_STATS" />
-            <application
-                android:allowBackup="true"
-                android:label="Benchmark Celular"
-                android:icon="@mipmap/ic_launcher"
-                android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-                android:usesCleartextTraffic="true">
-                <activity
-                    android:name=".MainActivity"
-                    android:exported="true"
-                    android:screenOrientation="unspecified"
-                    android:configChanges="orientation|screenSize|keyboardHidden">
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                    </intent-filter>
-                </activity>
-            </application>
-        </manifest>
-        XML
-        
-        # strings.xml
-        cat > "$PROJECT_DIR/app/src/main/res/values/strings.xml" << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <resources>
-            <string name="app_name">Benchmark Celular</string>
-        </resources>
-        XML
-        
-        # ic_launcher drawables (simple XML vector)
-        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-hdpi"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-mdpi"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xhdpi"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xxhdpi"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xxxhdpi"
-        mkdir -p "$PROJECT_DIR/app/src/main/res/drawable"
-        
-        # Use a simple color drawable as launcher icon
-        cat > "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml" << 'XML'
-        <?xml version="1.0" encoding="utf-8"?>
-        <shape xmlns:android="http://schemas.android.com/apk/res/android">
-            <solid android:color="#302b63"/>
-        </shape>
-        XML
-        
-        # Copy PNG icons as mipmap
+        cp index.html "$P/app/src/main/assets/" 2>/dev/null || true
+        cp manifest.json "$P/app/src/main/assets/" 2>/dev/null || true
+        cp sw.js "$P/app/src/main/assets/" 2>/dev/null || true
+        if [ -d icons ]; then cp -r icons "$P/app/src/main/assets/"; fi
+
+        # Copy icons as mipmaps
         if [ -f icons/icon-192.png ]; then
-          cp icons/icon-192.png "$PROJECT_DIR/app/src/main/res/mipmap-mdpi/ic_launcher.png"
-          cp icons/icon-192.png "$PROJECT_DIR/app/src/main/res/mipmap-hdpi/ic_launcher.png"
+          cp icons/icon-192.png "$P/app/src/main/res/mipmap-mdpi/ic_launcher.png"
+          cp icons/icon-192.png "$P/app/src/main/res/mipmap-hdpi/ic_launcher.png"
         fi
         if [ -f icons/icon-512.png ]; then
-          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
-          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
-          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+          cp icons/icon-512.png "$P/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
+          cp icons/icon-512.png "$P/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
         fi
-        
-        # settings.gradle
-        cat > "$PROJECT_DIR/settings.gradle" << 'GRADLE'
-        pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
-        }
-        dependencyResolutionManagement {
-            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
-        rootProject.name = "BenchmarkCelular"
-        include ':app'
-        GRADLE
-        
-        # Root build.gradle
-        cat > "$PROJECT_DIR/build.gradle" << 'GRADLE'
-        plugins {
-            id 'com.android.application' version '8.5.2' apply false
-        }
-        GRADLE
-        
-        # gradle.properties
-        cat > "$PROJECT_DIR/gradle.properties" << 'PROPS'
-        android.useAndroidX=true
-        android.nonTransitiveRClass=true
-        org.gradle.jvmargs=-Xmx2048m
-        PROPS
-        
-        # app/build.gradle
-        cat > "$PROJECT_DIR/app/build.gradle" << 'GRADLE'
-        plugins {
-            id 'com.android.application'
-        }
-        android {
-            namespace 'com.benchmark.celular'
-            compileSdk 34
-            defaultConfig {
-                applicationId "com.benchmark.celular"
-                minSdk 21
-                targetSdk 34
-                versionCode 1
-                versionName "1.0.0"
-            }
-            signingConfigs {
-                release {
-                    storeFile file("../release.keystore")
-                    storePassword "benchmark123"
-                    keyAlias "benchmark"
-                    keyPassword "benchmark123"
-                }
-            }
-            buildTypes {
-                release {
-                    signingConfig signingConfigs.release
-                    minifyEnabled false
-                }
-            }
-            compileOptions {
-                sourceCompatibility JavaVersion.VERSION_17
-                targetCompatibility JavaVersion.VERSION_17
-            }
-        }
-        dependencies {
-            implementation 'androidx.appcompat:appcompat:1.6.1'
-        }
-        GRADLE
-        
-        # Copy keystore to project
-        cp release.keystore "$PROJECT_DIR/"
-        
-        # Create gradlew with wrapper pointing to compatible Gradle version
-        mkdir -p "$PROJECT_DIR/gradle/wrapper"
-        cat > "$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties" << 'PROPS'
-        distributionBase=GRADLE_USER_HOME
-        distributionPath=wrapper/dists
-        distributionUrl=https\://services.gradle.org/distributions/gradle-8.10.2-bin.zip
-        networkTimeout=10000
-        validateDistributionUrl=true
-        zipStoreBase=GRADLE_USER_HOME
-        zipStorePath=wrapper/dists
-        PROPS
-        
-        # Create gradlew script
-        cat > "$PROJECT_DIR/gradlew" << 'GRADLEW'
-        #!/bin/sh
-        ##############################################################################
-        ##
-        ##  Gradle start up script for POSIX generated by Gradle.
-        ##
-        ##############################################################################
-        # Attempt to set APP_HOME
-        APP_HOME=$( cd "${APP_HOME:-$(dirname "$0")}" > /dev/null && pwd -P ) || exit
-        exec gradle "$@"
-        GRADLEW
-        chmod +x "$PROJECT_DIR/gradlew"
-        
-        # Build APK
-        cd "$PROJECT_DIR"
-        ./gradlew assembleRelease --no-daemon
-        
-        # Copy APK back to root
-        find . -name "*.apk" -type f -exec cp {} ../benchmark-celular-release.apk \;
-        cd ..
-        
-        ls -la *.apk
 
-    - name: Upload APK Artifact
+        # === JAVA FILE ===
+        cat > "$P/app/src/main/java/com/benchmark/celular/MainActivity.java" << 'ENDJAVA'
+package com.benchmark.celular;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.os.Bundle;
+import android.util.Log;
+import android.webkit.ConsoleMessage;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+public class MainActivity extends Activity {
+    private static final String TAG = "BenchmarkCelular";
+    private WebView webView;
+
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        try {
+            webView = new WebView(this);
+            WebSettings s = webView.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setDomStorageEnabled(true);
+            s.setDatabaseEnabled(true);
+            s.setAllowFileAccess(true);
+            s.setAllowContentAccess(true);
+            s.setLoadWithOverviewMode(true);
+            s.setUseWideViewPort(true);
+            s.setCacheMode(WebSettings.LOAD_DEFAULT);
+            s.setMediaPlaybackRequiresUserGesture(false);
+            s.setBuiltInZoomControls(false);
+            s.setDisplayZoomControls(false);
+            s.setSupportZoom(false);
+            s.setJavaScriptCanOpenWindowsAutomatically(false);
+
+            webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                    Log.e(TAG, "WV error: " + (e != null ? e.getDescription() : "?"));
+                }
+                @Override
+                public void onPageFinished(WebView v, String u) {
+                    Log.i(TAG, "Page OK: " + u);
+                }
+            });
+            webView.setWebChromeClient(new WebChromeClient() {
+                @Override
+                public boolean onConsoleMessage(ConsoleMessage cm) {
+                    Log.i(TAG, "JS: " + cm.message());
+                    return true;
+                }
+            });
+            webView.loadUrl("file:///android_asset/index.html");
+            setContentView(webView);
+        } catch (Exception e) {
+            Log.e(TAG, "Fatal: " + e.getMessage(), e);
+            finish();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (webView != null) {
+            webView.stopLoading();
+            webView.removeAllViews();
+            webView.destroy();
+            webView = null;
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+}
+ENDJAVA
+
+        # === MANIFEST ===
+        cat > "$P/app/src/main/AndroidManifest.xml" << 'ENDMANI'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.benchmark.celular">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application
+        android:allowBackup="true"
+        android:label="Benchmark Celular"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+ENDMANI
+
+        # === strings ===
+        cat > "$P/app/src/main/res/values/strings.xml" << 'ENDXML'
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Benchmark Celular</string>
+</resources>
+ENDXML
+
+        # === settings.gradle ===
+        cat > "$P/settings.gradle" << 'ENDSET'
+pluginManagement {
+    repositories { google(); mavenCentral(); gradlePluginPortal(); }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories { google(); mavenCentral(); }
+}
+rootProject.name = "BenchmarkCelular"
+include ':app'
+ENDSET
+
+        # === root build.gradle ===
+        cat > "$P/build.gradle" << 'ENDPLUG'
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+}
+ENDPLUG
+
+        # === gradle.properties ===
+        cat > "$P/gradle.properties" << 'ENDPROPS'
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+org.gradle.jvmargs=-Xmx2048m
+android.defaults.buildfeatures.buildconfig=true
+ENDPROPS
+
+        # === wrapper ===
+        cat > "$P/gradle/wrapper/gradle-wrapper.properties" << 'ENDWRAP'
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+ENDWRAP
+
+        # === app/build.gradle ===
+        cat > "$P/app/build.gradle" << 'ENDAPP'
+plugins {
+    id 'com.android.application'
+}
+android {
+    namespace 'com.benchmark.celular'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.benchmark.celular"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+    signingConfigs {
+        release {
+            storeFile file("../release.keystore")
+            storePassword "benchmark123"
+            keyAlias "benchmark"
+            keyPassword "benchmark123"
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+ENDAPP
+
+        # === gradlew ===
+        cat > "$P/gradlew" << 'ENDGW'
+#!/bin/sh
+APP_HOME=$( cd "${APP_HOME:-$(dirname "$0")}" > /dev/null && pwd -P ) || exit
+exec gradle "$@"
+ENDGW
+        chmod +x "$P/gradlew"
+
+        # Copy keystore
+        cp release.keystore "$P/"
+
+        # Build
+        cd "$P"
+        ./gradlew assembleRelease --no-daemon
+        cd ..
+
+        # Copy APK
+        find "$P" -name "*.apk" -exec cp {} benchmark-celular-release.apk \;
+        ls -la benchmark-celular-release.apk
+
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: benchmark-celular-apk
@@ -279,11 +296,12 @@ jobs:
         if-no-files-found: error
         retention-days: 90
 
-    - name: Create Release
+    - name: Release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v1
       with:
         files: benchmark-celular-release.apk
         generate_release_notes: true
+        fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

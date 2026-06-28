@@ -16,74 +16,51 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-
     - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Install Bubblewrap CLI
-      run: |
-        npm install -g @anthropic/bubblewrap 2>/dev/null || npm install -g @nicolo-ribaudo/bubblewrap-cli 2>/dev/null || true
-        # Fallback: install from Google's bubblewrap
-        npm install -g bubblewrap 2>/dev/null || true
-        which bubblewrap || echo "Will use alternative method"
-
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    - name: Build APK with Bubblewrap
-      env:
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'benchmark123' }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'benchmark' }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'benchmark123' }}
+    - name: Accept Android SDK licenses
       run: |
-        # Generate keystore if not exists
-        if [ ! -f release.keystore ]; then
-          keytool -genkey -v \
-            -keystore release.keystore \
-            -alias $KEY_ALIAS \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass $KEYSTORE_PASSWORD \
-            -keypass $KEY_PASSWORD \
-            -dname "CN=Benchmark, OU=Dev, O=Benchmark, L=BR, S=BR, C=BR"
-        fi
+        yes | sdkmanager --licenses || true
+        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
-        # Try bubblewrap build
-        if command -v bubblewrap &> /dev/null; then
-          bubblewrap build \
-            --manifest https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json \
-            --keystore release.keystore \
-            --storePassword $KEYSTORE_PASSWORD \
-            --alias $KEY_ALIAS \
-            --password $KEY_PASSWORD
-        else
-          # Alternative: Use Android SDK directly with WebView wrapper
-          echo "Using direct Android build method..."
-          mkdir -p android-project
-          cd android-project
-          
-          # Create minimal Android project structure
-          mkdir -p app/src/main/java/com/benchmark/celular
-          mkdir -p app/src/main/res/layout
-          mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/assets
-          
-          # Copy web assets
-          cp ../../index.html app/src/main/assets/
-          cp ../../manifest.json app/src/main/assets/
-          cp ../../sw.js app/src/main/assets/
-          cp -r ../../icons app/src/main/assets/
-          
-          # Create MainActivity
-          cat > app/src/main/java/com/benchmark/celular/MainActivity.java << 'JAVA'
+    - name: Generate Keystore
+      run: |
+        keytool -genkey -v \
+          -keystore release.keystore \
+          -alias benchmark \
+          -keyalg RSA \
+          -keysize 2048 \
+          -validity 10000 \
+          -storepass benchmark123 \
+          -keypass benchmark123 \
+          -dname "CN=Benchmark, OU=Dev, O=Benchmark, L=BR, ST=BR, C=BR"
+
+    - name: Build Android APK
+      env:
+        ANDROID_HOME: ${{ env.ANDROID_HOME }}
+      run: |
+        PROJECT_DIR="android-project"
+        mkdir -p "$PROJECT_DIR/app/src/main/java/com/benchmark/celular"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/values"
+        mkdir -p "$PROJECT_DIR/app/src/main/assets"
+        
+        # Copy web assets
+        cp index.html "$PROJECT_DIR/app/src/main/assets/"
+        cp manifest.json "$PROJECT_DIR/app/src/main/assets/"
+        cp sw.js "$PROJECT_DIR/app/src/main/assets/"
+        if [ -d icons ]; then
+          cp -r icons "$PROJECT_DIR/app/src/main/assets/"
+        fi
+        
+        # MainActivity.java
+        cat > "$PROJECT_DIR/app/src/main/java/com/benchmark/celular/MainActivity.java" << 'JAVA'
         package com.benchmark.celular;
         
         import android.os.Bundle;
@@ -109,20 +86,28 @@ jobs:
                 webView.setWebViewClient(new WebViewClient());
                 webView.loadUrl("file:///android_asset/index.html");
                 setContentView(webView);
+                
+                // Enable fullscreen
+                getWindow().getDecorView().setSystemUiVisibility(
+                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN |
+                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                );
             }
         }
         JAVA
-          
-          # Create AndroidManifest.xml
-          cat > app/src/main/AndroidManifest.xml << 'XML'
+        
+        # AndroidManifest.xml
+        cat > "$PROJECT_DIR/app/src/main/AndroidManifest.xml" << 'XML'
         <?xml version="1.0" encoding="utf-8"?>
         <manifest xmlns:android="http://schemas.android.com/apk/res/android"
             package="com.benchmark.celular">
             <uses-permission android:name="android.permission.INTERNET" />
             <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+            <uses-permission android:name="android.permission.BATTERY_STATS" />
             <application
                 android:allowBackup="true"
                 android:label="Benchmark Celular"
+                android:icon="@mipmap/ic_launcher"
                 android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
                 android:usesCleartextTraffic="true">
                 <activity
@@ -138,27 +123,78 @@ jobs:
             </application>
         </manifest>
         XML
-          
-          # Create build.gradle files
-          cat > build.gradle << 'GRADLE'
-        buildscript {
+        
+        # strings.xml
+        cat > "$PROJECT_DIR/app/src/main/res/values/strings.xml" << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <string name="app_name">Benchmark Celular</string>
+        </resources>
+        XML
+        
+        # ic_launcher drawables (simple XML vector)
+        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-hdpi"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-mdpi"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xhdpi"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xxhdpi"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/mipmap-xxxhdpi"
+        mkdir -p "$PROJECT_DIR/app/src/main/res/drawable"
+        
+        # Use a simple color drawable as launcher icon
+        cat > "$PROJECT_DIR/app/src/main/res/drawable/ic_launcher_background.xml" << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <shape xmlns:android="http://schemas.android.com/apk/res/android">
+            <solid android:color="#302b63"/>
+        </shape>
+        XML
+        
+        # Copy PNG icons as mipmap
+        if [ -f icons/icon-192.png ]; then
+          cp icons/icon-192.png "$PROJECT_DIR/app/src/main/res/mipmap-mdpi/ic_launcher.png"
+          cp icons/icon-192.png "$PROJECT_DIR/app/src/main/res/mipmap-hdpi/ic_launcher.png"
+        fi
+        if [ -f icons/icon-512.png ]; then
+          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xhdpi/ic_launcher.png"
+          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xxhdpi/ic_launcher.png"
+          cp icons/icon-512.png "$PROJECT_DIR/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+        fi
+        
+        # settings.gradle
+        cat > "$PROJECT_DIR/settings.gradle" << 'GRADLE'
+        pluginManagement {
             repositories {
                 google()
                 mavenCentral()
-            }
-            dependencies {
-                classpath 'com.android.tools.build:gradle:8.1.0'
+                gradlePluginPortal()
             }
         }
-        allprojects {
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
             repositories {
                 google()
                 mavenCentral()
             }
+        }
+        rootProject.name = "BenchmarkCelular"
+        include ':app'
+        GRADLE
+        
+        # Root build.gradle
+        cat > "$PROJECT_DIR/build.gradle" << 'GRADLE'
+        plugins {
+            id 'com.android.application' version '8.1.0' apply false
         }
         GRADLE
-          
-          cat > app/build.gradle << 'GRADLE'
+        
+        # gradle.properties
+        cat > "$PROJECT_DIR/gradle.properties" << 'PROPS'
+        android.useAndroidX=true
+        android.nonTransitiveRClass=true
+        org.gradle.jvmargs=-Xmx2048m
+        PROPS
+        
+        # app/build.gradle
+        cat > "$PROJECT_DIR/app/build.gradle" << 'GRADLE'
         plugins {
             id 'com.android.application'
         }
@@ -174,10 +210,10 @@ jobs:
             }
             signingConfigs {
                 release {
-                    storeFile file("../../release.keystore")
-                    storePassword System.getenv("KEYSTORE_PASSWORD") ?: "benchmark123"
-                    keyAlias System.getenv("KEY_ALIAS") ?: "benchmark"
-                    keyPassword System.getenv("KEY_PASSWORD") ?: "benchmark123"
+                    storeFile file("../release.keystore")
+                    storePassword "benchmark123"
+                    keyAlias "benchmark"
+                    keyPassword "benchmark123"
                 }
             }
             buildTypes {
@@ -186,61 +222,56 @@ jobs:
                     minifyEnabled false
                 }
             }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
         }
         dependencies {
             implementation 'androidx.appcompat:appcompat:1.6.1'
         }
         GRADLE
-          
-          cat > settings.gradle << 'GRADLE'
-        pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
-        }
-        rootProject.name = "BenchmarkCelular"
-        include ':app'
-        GRADLE
-          
-          cat > gradle.properties << 'PROPS'
-        android.useAndroidX=true
-        android.nonTransitiveRClass=true
-        PROPS
-          
-          # Build with gradle
-          chmod +x gradlew 2>/dev/null || true
-          ./gradlew assembleRelease || gradle assembleRelease
-          
-          cd ..
-        fi
+        
+        # Copy keystore to project
+        cp release.keystore "$PROJECT_DIR/"
+        
+        # Create gradlew script
+        cat > "$PROJECT_DIR/gradlew" << 'GRADLEW'
+        #!/bin/sh
+        ##############################################################################
+        ##
+        ##  Gradle start up script for POSIX generated by Gradle.
+        ##
+        ##############################################################################
+        # Attempt to set APP_HOME
+        APP_HOME=$( cd "${APP_HOME:-$(dirname "$0")}" > /dev/null && pwd -P ) || exit
+        exec gradle "$@"
+        GRADLEW
+        chmod +x "$PROJECT_DIR/gradlew"
+        
+        # Build APK
+        cd "$PROJECT_DIR"
+        gradle assembleRelease
+        
+        # Copy APK back to root
+        find . -name "*.apk" -type f -exec cp {} ../benchmark-celular-release.apk \;
+        cd ..
+        
+        ls -la *.apk
 
-    - name: Locate APK
-      run: |
-        find . -name "*.apk" -type f 2>/dev/null
-        # Copy APK to root for easy access
-        find . -name "*.apk" -type f -exec cp {} benchmark-celular.apk \; 2>/dev/null || true
-        ls -la *.apk 2>/dev/null || echo "APK not found in expected location"
-
-    - name: Upload APK as Artifact
+    - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: benchmark-celular-apk
-        path: |
-          **/*.apk
-          benchmark-celular.apk
-        if-no-files-found: warn
-        retention-days: 30
+        path: benchmark-celular-release.apk
+        if-no-files-found: error
+        retention-days: 90
 
     - name: Create Release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          **/*.apk
-          benchmark-celular.apk
+        files: benchmark-celular-release.apk
         generate_release_notes: true
-        fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

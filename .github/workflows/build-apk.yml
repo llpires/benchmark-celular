@@ -182,7 +182,7 @@ jobs:
         # Root build.gradle
         cat > "$PROJECT_DIR/build.gradle" << 'GRADLE'
         plugins {
-            id 'com.android.application' version '8.12.0' apply false
+            id 'com.android.application' version '8.5.2' apply false
         }
         GRADLE
         
@@ -235,6 +235,18 @@ jobs:
         # Copy keystore to project
         cp release.keystore "$PROJECT_DIR/"
         
+        # Create gradlew with wrapper pointing to compatible Gradle version
+        mkdir -p "$PROJECT_DIR/gradle/wrapper"
+        cat > "$PROJECT_DIR/gradle/wrapper/gradle-wrapper.properties" << 'PROPS'
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        distributionUrl=https\://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+        networkTimeout=10000
+        validateDistributionUrl=true
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        PROPS
+        
         # Create gradlew script
         cat > "$PROJECT_DIR/gradlew" << 'GRADLEW'
         #!/bin/sh
@@ -251,7 +263,7 @@ jobs:
         
         # Build APK
         cd "$PROJECT_DIR"
-        gradle assembleRelease
+        ./gradlew assembleRelease --no-daemon
         
         # Copy APK back to root
         find . -name "*.apk" -type f -exec cp {} ../benchmark-celular-release.apk \;

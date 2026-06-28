@@ -1,0 +1,246 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Install Bubblewrap CLI
+      run: |
+        npm install -g @anthropic/bubblewrap 2>/dev/null || npm install -g @nicolo-ribaudo/bubblewrap-cli 2>/dev/null || true
+        # Fallback: install from Google's bubblewrap
+        npm install -g bubblewrap 2>/dev/null || true
+        which bubblewrap || echo "Will use alternative method"
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Build APK with Bubblewrap
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD || 'benchmark123' }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS || 'benchmark' }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || 'benchmark123' }}
+      run: |
+        # Generate keystore if not exists
+        if [ ! -f release.keystore ]; then
+          keytool -genkey -v \
+            -keystore release.keystore \
+            -alias $KEY_ALIAS \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass $KEYSTORE_PASSWORD \
+            -keypass $KEY_PASSWORD \
+            -dname "CN=Benchmark, OU=Dev, O=Benchmark, L=BR, S=BR, C=BR"
+        fi
+
+        # Try bubblewrap build
+        if command -v bubblewrap &> /dev/null; then
+          bubblewrap build \
+            --manifest https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json \
+            --keystore release.keystore \
+            --storePassword $KEYSTORE_PASSWORD \
+            --alias $KEY_ALIAS \
+            --password $KEY_PASSWORD
+        else
+          # Alternative: Use Android SDK directly with WebView wrapper
+          echo "Using direct Android build method..."
+          mkdir -p android-project
+          cd android-project
+          
+          # Create minimal Android project structure
+          mkdir -p app/src/main/java/com/benchmark/celular
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
+          
+          # Copy web assets
+          cp ../../index.html app/src/main/assets/
+          cp ../../manifest.json app/src/main/assets/
+          cp ../../sw.js app/src/main/assets/
+          cp -r ../../icons app/src/main/assets/
+          
+          # Create MainActivity
+          cat > app/src/main/java/com/benchmark/celular/MainActivity.java << 'JAVA'
+        package com.benchmark.celular;
+        
+        import android.os.Bundle;
+        import android.webkit.WebSettings;
+        import android.webkit.WebView;
+        import android.webkit.WebViewClient;
+        import androidx.appcompat.app.AppCompatActivity;
+        
+        public class MainActivity extends AppCompatActivity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                WebView webView = new WebView(this);
+                WebSettings settings = webView.getSettings();
+                settings.setJavaScriptEnabled(true);
+                settings.setDomStorageEnabled(true);
+                settings.setAllowFileAccess(true);
+                settings.setAllowContentAccess(true);
+                settings.setLoadWithOverviewMode(true);
+                settings.setUseWideViewPort(true);
+                settings.setMediaPlaybackRequiresUserGesture(false);
+                settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+                webView.setWebViewClient(new WebViewClient());
+                webView.loadUrl("file:///android_asset/index.html");
+                setContentView(webView);
+            }
+        }
+        JAVA
+          
+          # Create AndroidManifest.xml
+          cat > app/src/main/AndroidManifest.xml << 'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            package="com.benchmark.celular">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+            <application
+                android:allowBackup="true"
+                android:label="Benchmark Celular"
+                android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                android:usesCleartextTraffic="true">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:screenOrientation="unspecified"
+                    android:configChanges="orientation|screenSize|keyboardHidden">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        XML
+          
+          # Create build.gradle files
+          cat > build.gradle << 'GRADLE'
+        buildscript {
+            repositories {
+                google()
+                mavenCentral()
+            }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:8.1.0'
+            }
+        }
+        allprojects {
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        GRADLE
+          
+          cat > app/build.gradle << 'GRADLE'
+        plugins {
+            id 'com.android.application'
+        }
+        android {
+            namespace 'com.benchmark.celular'
+            compileSdk 34
+            defaultConfig {
+                applicationId "com.benchmark.celular"
+                minSdk 21
+                targetSdk 34
+                versionCode 1
+                versionName "1.0.0"
+            }
+            signingConfigs {
+                release {
+                    storeFile file("../../release.keystore")
+                    storePassword System.getenv("KEYSTORE_PASSWORD") ?: "benchmark123"
+                    keyAlias System.getenv("KEY_ALIAS") ?: "benchmark"
+                    keyPassword System.getenv("KEY_PASSWORD") ?: "benchmark123"
+                }
+            }
+            buildTypes {
+                release {
+                    signingConfig signingConfigs.release
+                    minifyEnabled false
+                }
+            }
+        }
+        dependencies {
+            implementation 'androidx.appcompat:appcompat:1.6.1'
+        }
+        GRADLE
+          
+          cat > settings.gradle << 'GRADLE'
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        rootProject.name = "BenchmarkCelular"
+        include ':app'
+        GRADLE
+          
+          cat > gradle.properties << 'PROPS'
+        android.useAndroidX=true
+        android.nonTransitiveRClass=true
+        PROPS
+          
+          # Build with gradle
+          chmod +x gradlew 2>/dev/null || true
+          ./gradlew assembleRelease || gradle assembleRelease
+          
+          cd ..
+        fi
+
+    - name: Locate APK
+      run: |
+        find . -name "*.apk" -type f 2>/dev/null
+        # Copy APK to root for easy access
+        find . -name "*.apk" -type f -exec cp {} benchmark-celular.apk \; 2>/dev/null || true
+        ls -la *.apk 2>/dev/null || echo "APK not found in expected location"
+
+    - name: Upload APK as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-celular-apk
+        path: |
+          **/*.apk
+          benchmark-celular.apk
+        if-no-files-found: warn
+        retention-days: 30
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          **/*.apk
+          benchmark-celular.apk
+        generate_release_notes: true
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

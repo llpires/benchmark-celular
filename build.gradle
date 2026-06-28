@@ -1,0 +1,8 @@
+# Dependencies for local build (used by GitHub Actions)
+# This file enables the gradle wrapper
+
+# Android Gradle Plugin
+com.android.tools.build:gradle:8.1.0
+
+# AndroidX
+androidx.appcompat:appcompat:1.6.1

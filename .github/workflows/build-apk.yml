@@ -21,7 +21,7 @@ jobs:
 
     - uses: android-actions/setup-android@v3
 
-    - name: Setup project
+    - name: Prepare assets & keystore
       run: |
         mkdir -p android-studio-project/app/src/main/assets
         cp index.html android-studio-project/app/src/main/assets/
@@ -50,12 +50,9 @@ jobs:
           -storepass benchmark123 -keypass benchmark123 \
           -dname "CN=Benchmark, OU=Dev, O=Benchmark, L=BR, ST=BR, C=BR"
 
-        curl -sL https://raw.githubusercontent.com/gradle/gradle/master/gradlew -o android-studio-project/gradlew
-        chmod +x android-studio-project/gradlew
-
-    - name: Build
+    - name: Build APK
       working-directory: ./android-studio-project
-      run: ./gradlew assembleRelease --no-daemon
+      run: gradle wrapper --gradle-version 8.10.2 && ./gradlew assembleRelease --no-daemon
 
     - name: Copy APK
       run: |
